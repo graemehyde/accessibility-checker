@@ -3,64 +3,16 @@ import { writeFileSync } from 'fs';
 // ── Module metadata ────────────────────────────────────────────────────────────
 
 const MODULE_META = {
-  // Visual Quality
-  'colour-contrast':    { name: 'Colour Contrast',              wcag: '1.4.3, 1.4.6' },
-  'colour-blindness':   { name: 'Colour Blindness Simulation',  wcag: '1.4.3, 1.4.6' },
-  'text-size':          { name: 'Rendered Text Size',           wcag: '1.4.4' },
-  'visual-density':     { name: 'Visual Density & Crowding',    wcag: 'best practice' },
-  'focus-indicator':    { name: 'Focus Indicator Visibility',   wcag: '2.4.7, 2.4.11' },
-  'animation-flashing': { name: 'Animation & Flashing',         wcag: '2.3.1' },
-  // Layout & Navigation
-  'touch-target':       { name: 'Touch Target Sizing',          wcag: '2.5.5, 2.5.8' },
-  'reading-order':      { name: 'Reading Order vs Visual Flow', wcag: '1.3.2' },
-  'text-reflow':        { name: 'Text Reflow at 200% Zoom',     wcag: '1.4.10' },
-  'keyboard-nav':       { name: 'Keyboard Navigation',          wcag: '2.1.1, 2.4.3' },
-  'icon-buttons':       { name: 'Icon-Only Buttons',            wcag: '1.1.1, 4.1.2' },
-  'custom-controls':    { name: 'Custom Controls',              wcag: '4.1.2' },
-  // Content & Media
-  'alt-text':           { name: 'Alt Text Accuracy',            wcag: '1.1.1' },
-  'alt-text-patterns':  { name: 'Alt Text Patterns',            wcag: '1.1.1' },
-  'link-text':          { name: 'Link Text Clarity',            wcag: '2.4.4' },
-  'captions':           { name: 'Captions & Transcripts',       wcag: '1.2.2, 1.2.3' },
-  'language':           { name: 'Language Attributes',          wcag: '3.1.1, 3.1.2' },
-  // HTML Structure & ARIA
-  'semantic-html':      { name: 'Semantic HTML Structure',      wcag: '1.3.1, 4.1.2' },
-  'aria':               { name: 'ARIA Attributes',              wcag: '4.1.2' },
-  'form-labels':        { name: 'Form Label Association',       wcag: '1.3.1, 3.3.2' },
-  'live-regions':       { name: 'ARIA Live Regions',            wcag: '4.1.3' },
-  // Cognitive Accessibility
-  'reading-level':      { name: 'Reading Level',                wcag: '3.1.5' },
-  'content-hierarchy':  { name: 'Content Hierarchy',            wcag: '1.3.1, 2.4.6' },
-  'instruction-clarity':{ name: 'Instruction Clarity',          wcag: '3.3.2' },
-  'jargon':             { name: 'Jargon Density',               wcag: 'best practice' },
+  'semantic-html':     { name: 'Semantic HTML',           wcag: '1.3.1, 4.1.2' },
+  'aria':              { name: 'ARIA Attributes',          wcag: '4.1.2' },
+  'touch-target':      { name: 'Touch Target Sizing',      wcag: '2.5.5, 2.5.8' },
+  'alt-text-patterns': { name: 'Alt Text Patterns',        wcag: '1.1.1' },
+  'colour-contrast':   { name: 'Colour Contrast',          wcag: '1.4.3, 1.4.6' },
+  'alt-text':          { name: 'Alt Text Accuracy',        wcag: '1.1.1' },
 };
 
-const GROUPS = [
-  {
-    id: 'visual',
-    name: 'Visual Quality',
-    modules: ['colour-contrast', 'colour-blindness', 'text-size', 'visual-density', 'focus-indicator', 'animation-flashing'],
-  },
-  {
-    id: 'layout',
-    name: 'Layout & Navigation',
-    modules: ['touch-target', 'reading-order', 'text-reflow', 'keyboard-nav', 'icon-buttons', 'custom-controls'],
-  },
-  {
-    id: 'content',
-    name: 'Content & Media',
-    modules: ['alt-text', 'alt-text-patterns', 'link-text', 'captions', 'language'],
-  },
-  {
-    id: 'html',
-    name: 'HTML Structure & ARIA',
-    modules: ['semantic-html', 'aria', 'form-labels', 'live-regions'],
-  },
-  {
-    id: 'cognitive',
-    name: 'Cognitive Accessibility',
-    modules: ['reading-level', 'content-hierarchy', 'instruction-clarity', 'jargon'],
-  },
+const MODULE_ORDER = [
+  'semantic-html', 'aria', 'touch-target', 'alt-text-patterns', 'colour-contrast', 'alt-text',
 ];
 
 const BIAS_MODULE_ID = 'bias';
@@ -90,12 +42,24 @@ function badge(status) {
   return `<span class="badge ${status}">${ICON[status]} ${LABEL[status]}</span>`;
 }
 
+function deviceBadge(issue) {
+  if (issue.devices && issue.devices.length > 0) {
+    return issue.devices.map(d => `<span class="device-tag">${esc(d)}</span>`).join(' ');
+  }
+  if (issue.device) {
+    return `<span class="device-tag">${esc(issue.device)}</span>`;
+  }
+  return '';
+}
+
 function issueCard(issue) {
+  const devTag = deviceBadge(issue);
   return `
       <div class="issue-card ${issue.status}">
         <div class="issue-head">
           ${badge(issue.status)}
           <span class="wcag-tag">WCAG ${esc(issue.wcagLevel)} · ${esc(issue.wcagCriteria)}</span>
+          ${devTag}
         </div>
         <dl class="issue-fields">
           <dt>Element</dt><dd><code>${esc(issue.element)}</code></dd>
@@ -120,6 +84,17 @@ function moduleSection(moduleId, issues) {
       </summary>
       <div class="mod-body">
         ${issues.map(issueCard).join('')}
+      </div>
+    </details>`;
+}
+
+function screenshotPanel(key, entry) {
+  return `
+    <details>
+      <summary><span class="scr-arrow">▶</span> ${esc(entry.name)}</summary>
+      <div class="scr-wrap">
+        <img src="data:image/png;base64,${entry.base64}"
+             alt="Screenshot captured as ${esc(entry.name)}">
       </div>
     </details>`;
 }
@@ -177,6 +152,15 @@ const CSS = `
   .pill.pass { background: #f0fdf4; color: #166534; border-color: #86efac; }
   .pill.info { background: #eff6ff; color: #1e40af; border-color: #93c5fd; }
 
+  /* ── Device tags ── */
+  .device-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+  .device-tag {
+    display: inline-flex; align-items: center;
+    font-size: 10px; font-weight: 600; padding: 2px 7px;
+    border-radius: 4px; white-space: nowrap;
+    background: #f3f4f6; color: #4b5563; border: 1px solid #d1d5db;
+  }
+
   /* ── Cards ── */
   .card {
     background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
@@ -197,12 +181,14 @@ const CSS = `
   .screenshot-card details > summary {
     padding: 14px 20px; font-size: 14px; font-weight: 600; color: #374151;
     cursor: pointer; user-select: none; display: flex; align-items: center; gap: 8px;
-    list-style: none;
+    list-style: none; border-bottom: 1px solid #e5e7eb;
   }
+  .screenshot-card details:last-child > summary { border-bottom: none; }
+  .screenshot-card details[open] > summary { border-bottom: 1px solid #e5e7eb; }
   .screenshot-card details > summary::-webkit-details-marker { display: none; }
   .scr-arrow { font-size: 10px; color: #9ca3af; transition: transform 0.15s; }
   .screenshot-card details[open] > summary .scr-arrow { transform: rotate(90deg); }
-  .scr-wrap { border-top: 1px solid #e5e7eb; max-height: 580px; overflow-y: auto; }
+  .scr-wrap { max-height: 580px; overflow-y: auto; }
   .scr-wrap img { width: 100%; display: block; }
 
   /* ── Scorecard table ── */
@@ -217,6 +203,7 @@ const CSS = `
   .sc-name  { font-weight: 600; color: #111827; }
   .sc-count { color: #374151; font-size: 13px; }
   .sc-wcag  { font-family: ui-monospace, 'Cascadia Code', monospace; font-size: 12px; color: #6b7280; }
+  .sc-devices { font-size: 11px; color: #6b7280; }
 
   /* ── Badges ── */
   .badge {
@@ -269,20 +256,6 @@ const CSS = `
   }
   .issue-fields dd { font-size: 13px; color: #374151; word-break: break-word; }
 
-  /* ── Group headings ── */
-  .group-header {
-    font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.09em; color: #6b7280;
-    padding: 20px 0 8px; border-bottom: 1px solid #e5e7eb; margin-bottom: 10px;
-  }
-  .findings-group:first-child .group-header { padding-top: 4px; }
-  .findings-group { margin-bottom: 4px; }
-  .sc-group-row td {
-    font-size: 10px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.09em; color: #6b7280; background: #f9fafb;
-    padding: 12px 12px 5px; border-bottom: 1px solid #e5e7eb;
-  }
-
   /* ── Inclusivity card ── */
   .incl-card { border-color: #ede9fe; background: #fdfcff; }
   .incl-intro { font-size: 13px; color: #6b7280; margin-top: -6px; margin-bottom: 16px; line-height: 1.6; }
@@ -290,8 +263,14 @@ const CSS = `
 
 // ── Main export ────────────────────────────────────────────────────────────────
 
-export function generateReport(issues, screenshotBase64, url, timestamp, outputPath = './report.html') {
-  // Group by moduleId
+/**
+ * @param {Array} issues - Issues array (with .device / .devices / .viewport fields)
+ * @param {Object} screenshots - Map of profileKey -> { name, base64 }
+ * @param {string} url
+ * @param {string} timestamp
+ * @param {string} outputPath
+ */
+export function generateReport(issues, screenshots, url, timestamp, outputPath = './report.html') {
   const byModule = {};
   for (const issue of issues) {
     (byModule[issue.moduleId] ??= []).push(issue);
@@ -304,10 +283,16 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
   const counts = { fail: 0, warn: 0, pass: 0, info: 0 };
   for (const i of scoredIssues) counts[i.status] = (counts[i.status] ?? 0) + 1;
 
-  const seen = new Set(scoredIssues.map(i => i.moduleId));
-  const allGroupedModules = new Set(GROUPS.flatMap(g => g.modules));
+  const seen      = new Set(scoredIssues.map(i => i.moduleId));
+  const moduleIds = [
+    ...MODULE_ORDER.filter(m => seen.has(m)),
+    ...[...seen].filter(m => !MODULE_ORDER.includes(m)),
+  ];
 
-  function scorecardRow(id) {
+  const deviceNames = Object.values(screenshots).map(s => s.name);
+  const multiDevice = Object.keys(screenshots).length > 1;
+
+  const scorecardRows = moduleIds.map(id => {
     const mIssues = byModule[id] ?? [];
     const mStatus = moduleStatus(mIssues);
     const meta    = MODULE_META[id] ?? { name: id, wcag: '' };
@@ -316,27 +301,32 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
     const summary = fails > 0 || warns > 0
       ? [fails > 0 ? `${fails} fail` : '', warns > 0 ? `${warns} warn` : ''].filter(Boolean).join(', ')
       : '—';
+
+    let devicesCell = '';
+    if (multiDevice) {
+      const issueDevices = new Set();
+      for (const issue of mIssues) {
+        if (issue.devices) issue.devices.forEach(d => issueDevices.add(d));
+        else if (issue.device) issueDevices.add(issue.device);
+      }
+      devicesCell = `<td class="sc-devices">${[...issueDevices].map(d => esc(d)).join(', ') || '—'}</td>`;
+    }
+
     return `
         <tr>
           <td>${badge(mStatus)}</td>
           <td class="sc-name">${esc(meta.name)}</td>
           <td class="sc-count">${esc(summary)}</td>
           <td class="sc-wcag">${esc(meta.wcag)}</td>
+          ${devicesCell}
         </tr>`;
-  }
+  }).join('');
 
-  const scorecardRows = [
-    ...GROUPS.flatMap(group => {
-      const ids = group.modules.filter(id => seen.has(id));
-      if (ids.length === 0) return [];
-      return [
-        `<tr class="sc-group-row"><td colspan="4">${esc(group.name)}</td></tr>`,
-        ...ids.map(scorecardRow),
-      ];
-    }),
-    // Ungrouped modules (unknown moduleIds returned by future checks)
-    ...[...seen].filter(id => !allGroupedModules.has(id)).map(scorecardRow),
-  ].join('');
+  const screenshotPanels = Object.entries(screenshots).map(
+    ([key, entry]) => screenshotPanel(key, entry)
+  ).join('');
+
+  const devicesHeader = multiDevice ? '<th>Devices</th>' : '';
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -360,7 +350,10 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
         <span>WCAG 2.1 AA</span>
         <span class="hdr-sep">·</span>
         <span>${scoredIssues.length} checked issue${scoredIssues.length !== 1 ? 's' : ''}</span>
+        <span class="hdr-sep">·</span>
+        <span>${deviceNames.length} device${deviceNames.length !== 1 ? 's' : ''}</span>
       </div>
+      ${multiDevice ? `<div class="device-tags">${deviceNames.map(d => `<span class="device-tag">${esc(d)}</span>`).join(' ')}</div>` : ''}
     </div>
     <div class="hdr-right">
       <div class="overall ${overall}">${ICON[overall]}&nbsp; OVERALL ${LABEL[overall]}</div>
@@ -373,15 +366,9 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
     </div>
   </header>
 
-  <!-- Screenshot -->
+  <!-- Screenshots -->
   <div class="card screenshot-card">
-    <details open>
-      <summary><span class="scr-arrow">▶</span> Page Screenshot</summary>
-      <div class="scr-wrap">
-        <img src="data:image/png;base64,${screenshotBase64}"
-             alt="Full-page screenshot of ${esc(url)}">
-      </div>
-    </details>
+    ${screenshotPanels}
   </div>
 
   <!-- Scorecard -->
@@ -390,7 +377,7 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
     <table class="sc-table">
       <thead>
         <tr>
-          <th>Status</th><th>Module</th><th>Issues</th><th>WCAG Criteria</th>
+          <th>Status</th><th>Module</th><th>Issues</th><th>WCAG Criteria</th>${devicesHeader}
         </tr>
       </thead>
       <tbody>${scorecardRows}
@@ -401,18 +388,7 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
   <!-- Findings -->
   <div class="card">
     <div class="card-title">Findings</div>
-    ${[
-      ...GROUPS.flatMap(group => {
-        const ids = group.modules.filter(id => seen.has(id));
-        if (ids.length === 0) return [];
-        return [`<div class="findings-group">
-      <div class="group-header">${esc(group.name)}</div>
-      ${ids.map(id => moduleSection(id, byModule[id] ?? [])).join('')}
-    </div>`];
-      }),
-      ...[...seen].filter(id => !allGroupedModules.has(id))
-        .map(id => moduleSection(id, byModule[id] ?? [])),
-    ].join('\n    ')}
+    ${moduleIds.map(id => moduleSection(id, byModule[id] ?? [])).join('')}
   </div>
 
   <!-- Inclusivity -->
