@@ -3,16 +3,64 @@ import { writeFileSync } from 'fs';
 // ── Module metadata ────────────────────────────────────────────────────────────
 
 const MODULE_META = {
-  'semantic-html':     { name: 'Semantic HTML',           wcag: '1.3.1, 4.1.2' },
-  'aria':              { name: 'ARIA Attributes',          wcag: '4.1.2' },
-  'touch-target':      { name: 'Touch Target Sizing',      wcag: '2.5.5, 2.5.8' },
-  'alt-text-patterns': { name: 'Alt Text Patterns',        wcag: '1.1.1' },
-  'colour-contrast':   { name: 'Colour Contrast',          wcag: '1.4.3, 1.4.6' },
-  'alt-text':          { name: 'Alt Text Accuracy',        wcag: '1.1.1' },
+  // Visual Quality
+  'colour-contrast':    { name: 'Colour Contrast',              wcag: '1.4.3, 1.4.6' },
+  'colour-blindness':   { name: 'Colour Blindness Simulation',  wcag: '1.4.3, 1.4.6' },
+  'text-size':          { name: 'Rendered Text Size',           wcag: '1.4.4' },
+  'visual-density':     { name: 'Visual Density & Crowding',    wcag: 'best practice' },
+  'focus-indicator':    { name: 'Focus Indicator Visibility',   wcag: '2.4.7, 2.4.11' },
+  'animation-flashing': { name: 'Animation & Flashing',         wcag: '2.3.1' },
+  // Layout & Navigation
+  'touch-target':       { name: 'Touch Target Sizing',          wcag: '2.5.5, 2.5.8' },
+  'reading-order':      { name: 'Reading Order vs Visual Flow', wcag: '1.3.2' },
+  'text-reflow':        { name: 'Text Reflow at 200% Zoom',     wcag: '1.4.10' },
+  'keyboard-nav':       { name: 'Keyboard Navigation',          wcag: '2.1.1, 2.4.3' },
+  'icon-buttons':       { name: 'Icon-Only Buttons',            wcag: '1.1.1, 4.1.2' },
+  'custom-controls':    { name: 'Custom Controls',              wcag: '4.1.2' },
+  // Content & Media
+  'alt-text':           { name: 'Alt Text Accuracy',            wcag: '1.1.1' },
+  'alt-text-patterns':  { name: 'Alt Text Patterns',            wcag: '1.1.1' },
+  'link-text':          { name: 'Link Text Clarity',            wcag: '2.4.4' },
+  'captions':           { name: 'Captions & Transcripts',       wcag: '1.2.2, 1.2.3' },
+  'language':           { name: 'Language Attributes',          wcag: '3.1.1, 3.1.2' },
+  // HTML Structure & ARIA
+  'semantic-html':      { name: 'Semantic HTML Structure',      wcag: '1.3.1, 4.1.2' },
+  'aria':               { name: 'ARIA Attributes',              wcag: '4.1.2' },
+  'form-labels':        { name: 'Form Label Association',       wcag: '1.3.1, 3.3.2' },
+  'live-regions':       { name: 'ARIA Live Regions',            wcag: '4.1.3' },
+  // Cognitive Accessibility
+  'reading-level':      { name: 'Reading Level',                wcag: '3.1.5' },
+  'content-hierarchy':  { name: 'Content Hierarchy',            wcag: '1.3.1, 2.4.6' },
+  'instruction-clarity':{ name: 'Instruction Clarity',          wcag: '3.3.2' },
+  'jargon':             { name: 'Jargon Density',               wcag: 'best practice' },
 };
 
-const MODULE_ORDER = [
-  'semantic-html', 'aria', 'touch-target', 'alt-text-patterns', 'colour-contrast', 'alt-text',
+const GROUPS = [
+  {
+    id: 'visual',
+    name: 'Visual Quality',
+    modules: ['colour-contrast', 'colour-blindness', 'text-size', 'visual-density', 'focus-indicator', 'animation-flashing'],
+  },
+  {
+    id: 'layout',
+    name: 'Layout & Navigation',
+    modules: ['touch-target', 'reading-order', 'text-reflow', 'keyboard-nav', 'icon-buttons', 'custom-controls'],
+  },
+  {
+    id: 'content',
+    name: 'Content & Media',
+    modules: ['alt-text', 'alt-text-patterns', 'link-text', 'captions', 'language'],
+  },
+  {
+    id: 'html',
+    name: 'HTML Structure & ARIA',
+    modules: ['semantic-html', 'aria', 'form-labels', 'live-regions'],
+  },
+  {
+    id: 'cognitive',
+    name: 'Cognitive Accessibility',
+    modules: ['reading-level', 'content-hierarchy', 'instruction-clarity', 'jargon'],
+  },
 ];
 
 const BIAS_MODULE_ID = 'bias';
@@ -221,6 +269,20 @@ const CSS = `
   }
   .issue-fields dd { font-size: 13px; color: #374151; word-break: break-word; }
 
+  /* ── Group headings ── */
+  .group-header {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.09em; color: #6b7280;
+    padding: 20px 0 8px; border-bottom: 1px solid #e5e7eb; margin-bottom: 10px;
+  }
+  .findings-group:first-child .group-header { padding-top: 4px; }
+  .findings-group { margin-bottom: 4px; }
+  .sc-group-row td {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.09em; color: #6b7280; background: #f9fafb;
+    padding: 12px 12px 5px; border-bottom: 1px solid #e5e7eb;
+  }
+
   /* ── Inclusivity card ── */
   .incl-card { border-color: #ede9fe; background: #fdfcff; }
   .incl-intro { font-size: 13px; color: #6b7280; margin-top: -6px; margin-bottom: 16px; line-height: 1.6; }
@@ -242,14 +304,10 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
   const counts = { fail: 0, warn: 0, pass: 0, info: 0 };
   for (const i of scoredIssues) counts[i.status] = (counts[i.status] ?? 0) + 1;
 
-  // Module display order: preferred order first, then any extras not in the list
-  const seen      = new Set(scoredIssues.map(i => i.moduleId));
-  const moduleIds = [
-    ...MODULE_ORDER.filter(m => seen.has(m)),
-    ...[...seen].filter(m => !MODULE_ORDER.includes(m)),
-  ];
+  const seen = new Set(scoredIssues.map(i => i.moduleId));
+  const allGroupedModules = new Set(GROUPS.flatMap(g => g.modules));
 
-  const scorecardRows = moduleIds.map(id => {
+  function scorecardRow(id) {
     const mIssues = byModule[id] ?? [];
     const mStatus = moduleStatus(mIssues);
     const meta    = MODULE_META[id] ?? { name: id, wcag: '' };
@@ -265,7 +323,20 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
           <td class="sc-count">${esc(summary)}</td>
           <td class="sc-wcag">${esc(meta.wcag)}</td>
         </tr>`;
-  }).join('');
+  }
+
+  const scorecardRows = [
+    ...GROUPS.flatMap(group => {
+      const ids = group.modules.filter(id => seen.has(id));
+      if (ids.length === 0) return [];
+      return [
+        `<tr class="sc-group-row"><td colspan="4">${esc(group.name)}</td></tr>`,
+        ...ids.map(scorecardRow),
+      ];
+    }),
+    // Ungrouped modules (unknown moduleIds returned by future checks)
+    ...[...seen].filter(id => !allGroupedModules.has(id)).map(scorecardRow),
+  ].join('');
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -330,7 +401,18 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
   <!-- Findings -->
   <div class="card">
     <div class="card-title">Findings</div>
-    ${moduleIds.map(id => moduleSection(id, byModule[id] ?? [])).join('')}
+    ${[
+      ...GROUPS.flatMap(group => {
+        const ids = group.modules.filter(id => seen.has(id));
+        if (ids.length === 0) return [];
+        return [`<div class="findings-group">
+      <div class="group-header">${esc(group.name)}</div>
+      ${ids.map(id => moduleSection(id, byModule[id] ?? [])).join('')}
+    </div>`];
+      }),
+      ...[...seen].filter(id => !allGroupedModules.has(id))
+        .map(id => moduleSection(id, byModule[id] ?? [])),
+    ].join('\n    ')}
   </div>
 
   <!-- Inclusivity -->
