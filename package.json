@@ -1,0 +1,20 @@
+{
+  "name": "accessibility-checker",
+  "version": "1.0.0",
+  "description": "CLI tool to capture screenshots and HTML from a URL for accessibility analysis",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "accessibility-checker": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@google/genai": "^1.43.0",
+    "playwright": "^1.50.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
