@@ -85,6 +85,53 @@ Perform these cognitive accessibility checks using only the HTML:
 
 ${RESPONSE_SCHEMA_NOTE}`;
 
+const INCLUSIVITY_RESPONSE_SCHEMA_NOTE = `Respond ONLY with a valid JSON array. No markdown fences, no preamble, no trailing explanation — raw JSON only.
+
+Each element of the array must be an object with exactly these fields:
+- "moduleId": the exact string specified in brackets after each check number above (e.g. "gendered-language")
+- "wcagLevel": always "info" — these findings are beyond WCAG
+- "wcagCriteria": a short label describing the best-practice principle, e.g. "Inclusive Design · Gender Neutrality"
+- "status": always "info"
+- "element": a CSS selector, plain-language description, or image region of the affected content
+- "detail": a clear, specific description of the issue observed and why it may exclude or marginalise users
+- "suggestion": an actionable recommendation to improve inclusivity
+
+Only report genuine issues. If a check finds nothing to flag, omit it entirely — do not include a "pass" entry.`;
+
+const INCLUSIVITY_MODULE_PROMPT = `You are an expert inclusivity, diversity, and equity consultant reviewing a webpage. Your role is to identify content, imagery, and patterns that may exclude, stereotype, or marginalise users based on gender, age, ethnicity, culture, ability, or geographic background.
+
+You will be given a full-page screenshot and the HTML source of the webpage.
+
+Perform these checks:
+
+From the screenshot:
+
+1. [representation] Representation in imagery: Are people depicted in photos, illustrations, or avatars diverse in gender expression, age, ethnicity, and visible ability? Flag homogeneous representation or conspicuous absence of any group.
+
+2. [symbolic-bias] Symbolic bias: Identify icons, flags, emblems, or imagery that implicitly assume a single culture, religion, or nationality as the default (e.g. a US flag as a default "English" selector, a church icon for "community").
+
+3. [colour-symbolism] Colour symbolism: Flag use of colour that carries culturally specific meaning that may not transfer globally (e.g. white = purity in some cultures / mourning in others; red = danger vs. luck vs. romance depending on context).
+
+From the HTML:
+
+4. [gendered-language] Gendered language: Identify words and phrases with unnecessary gender assumptions — job titles ("stewardess", "fireman", "manpower"), collective address ("hey guys"), or binary-only form fields (Male/Female with no other option).
+
+5. [cultural-idioms] Cultural idioms: Flag idioms, metaphors, or colloquialisms that are specific to one culture or language community and may be confusing or offensive to international users (e.g. "hit it out of the park", "spanner in the works").
+
+6. [locale-assumptions] Locale assumptions: Identify hardcoded locale conventions — date formats without ISO clarity (e.g. "03/04/25"), currency symbols without ISO codes (e.g. "$" instead of "USD"), imperial-only measurements, or phone/address fields assuming a single country.
+
+7. [exclusionary-phrasing] Exclusionary phrasing: Flag language that assumes ability, age, or technical literacy — dismissive minimisers ("just click", "simply scroll", "obviously", "easy"), ability assumptions ("you can see that…", "as you heard"), or age assumptions ("even your grandparents can use this").
+
+8. [pronoun-inclusivity] Pronoun inclusivity: In forms, profile settings, or sign-up flows, check whether gender-neutral pronoun options or a free-text field are available alongside or instead of binary gender selectors.
+
+From both screenshot and HTML:
+
+9. [stereotype-reinforcement] Stereotype reinforcement: Does the visual content (images, icons) contradict or reinforce stereotypes implied by the surrounding text? (e.g. an article about leadership showing only men, a "nurturing" section illustrated exclusively with women).
+
+10. [geographic-bias] Geographic bias: Are maps, example data, default content, phone number formats, or illustrative scenarios Western- or US-centric in a way that excludes or alienates users from other regions?
+
+${INCLUSIVITY_RESPONSE_SCHEMA_NOTE}`;
+
 const MODEL = 'gemini-flash-lite-latest';
 
 async function runModule(ai, name, systemPrompt, parts) {
@@ -107,7 +154,7 @@ async function runModule(ai, name, systemPrompt, parts) {
   }
 }
 
-export async function runLLMAudit(screenshotBase64, html) {
+function createClient() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -115,8 +162,20 @@ export async function runLLMAudit(screenshotBase64, html) {
       'Export it before running: export GEMINI_API_KEY=your_key_here'
     );
   }
+  return new GoogleGenAI({ apiKey });
+}
 
-  const ai = new GoogleGenAI({ apiKey });
+export async function runInclusivityAudit(screenshotBase64, html) {
+  const ai = createClient();
+  const parts = [
+    { inlineData: { mimeType: 'image/png', data: screenshotBase64 } },
+    { text: `HTML source:\n\n${html}` },
+  ];
+  return runModule(ai, 'inclusivity', INCLUSIVITY_MODULE_PROMPT, parts);
+}
+
+export async function runLLMAudit(screenshotBase64, html) {
+  const ai = createClient();
 
   const screenshotPart = {
     inlineData: { mimeType: 'image/png', data: screenshotBase64 },
@@ -125,12 +184,13 @@ export async function runLLMAudit(screenshotBase64, html) {
 
   console.error('Running LLM audit modules in parallel…');
 
-  const [imageResults, htmlResults, combinedResults, cognitiveResults] = await Promise.all([
-    runModule(ai, 'image',    IMAGE_MODULE_PROMPT,    [screenshotPart]),
-    runModule(ai, 'html',     HTML_MODULE_PROMPT,     [htmlPart]),
-    runModule(ai, 'combined', COMBINED_MODULE_PROMPT, [screenshotPart, htmlPart]),
-    runModule(ai, 'cognitive',COGNITIVE_MODULE_PROMPT,[htmlPart]),
+  const [imageResults, htmlResults, combinedResults, cognitiveResults, inclusivityResults] = await Promise.all([
+    runModule(ai, 'image',       IMAGE_MODULE_PROMPT,       [screenshotPart]),
+    runModule(ai, 'html',        HTML_MODULE_PROMPT,        [htmlPart]),
+    runModule(ai, 'combined',    COMBINED_MODULE_PROMPT,    [screenshotPart, htmlPart]),
+    runModule(ai, 'cognitive',   COGNITIVE_MODULE_PROMPT,   [htmlPart]),
+    runModule(ai, 'inclusivity', INCLUSIVITY_MODULE_PROMPT, [screenshotPart, htmlPart]),
   ]);
 
-  return [...imageResults, ...htmlResults, ...combinedResults, ...cognitiveResults];
+  return [...imageResults, ...htmlResults, ...combinedResults, ...cognitiveResults, ...inclusivityResults];
 }

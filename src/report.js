@@ -63,7 +63,37 @@ const GROUPS = [
   },
 ];
 
-const BIAS_MODULE_ID = 'bias';
+const INCLUSIVITY_META = {
+  'representation':          { name: 'Representation in Imagery' },
+  'symbolic-bias':           { name: 'Symbolic Bias' },
+  'colour-symbolism':        { name: 'Colour Symbolism' },
+  'gendered-language':       { name: 'Gendered Language' },
+  'cultural-idioms':         { name: 'Cultural Idioms' },
+  'locale-assumptions':      { name: 'Locale Assumptions' },
+  'exclusionary-phrasing':   { name: 'Exclusionary Phrasing' },
+  'pronoun-inclusivity':     { name: 'Pronoun Inclusivity' },
+  'stereotype-reinforcement':{ name: 'Stereotype Reinforcement' },
+  'geographic-bias':         { name: 'Geographic Bias' },
+  // Legacy
+  'bias':                    { name: 'Bias & Representation' },
+};
+
+const INCLUSIVITY_MODULE_IDS = new Set(Object.keys(INCLUSIVITY_META));
+
+const INCLUSIVITY_GROUPS = [
+  {
+    name: 'Visual',
+    modules: ['representation', 'symbolic-bias', 'colour-symbolism'],
+  },
+  {
+    name: 'Language & Content',
+    modules: ['gendered-language', 'cultural-idioms', 'locale-assumptions', 'exclusionary-phrasing', 'pronoun-inclusivity'],
+  },
+  {
+    name: 'Combined',
+    modules: ['stereotype-reinforcement', 'geographic-bias', 'bias'],
+  },
+];
 
 const ICON  = { fail: '✘', warn: '⚠', pass: '✔', info: 'ℹ' };
 const LABEL = { fail: 'FAIL', warn: 'WARN', pass: 'PASS', info: 'INFO' };
@@ -283,9 +313,35 @@ const CSS = `
     padding: 12px 12px 5px; border-bottom: 1px solid #e5e7eb;
   }
 
-  /* ── Inclusivity card ── */
-  .incl-card { border-color: #ede9fe; background: #fdfcff; }
-  .incl-intro { font-size: 13px; color: #6b7280; margin-top: -6px; margin-bottom: 16px; line-height: 1.6; }
+  /* ── Inclusivity section ── */
+  .incl-card { border-color: #ddd6fe; background: #fdfcff; }
+  .incl-intro {
+    font-size: 13px; color: #6b7280; margin-top: -4px; margin-bottom: 20px; line-height: 1.6;
+    padding: 12px 14px; background: #f5f3ff; border: 1px solid #ede9fe;
+    border-radius: 6px;
+  }
+  .incl-intro strong { color: #5b21b6; }
+
+  /* Purple badge variant for inclusivity items */
+  .incl-section .badge.info {
+    background: #f5f3ff; color: #6d28d9; border-color: #c4b5fd;
+  }
+  .incl-section .issue-card.info {
+    background: #fdfcff; border-color: #ede9fe; border-left-color: #8b5cf6;
+  }
+  .incl-section .mod-summary.info { background: #f5f3ff; }
+  .incl-section .mod-summary.pass { background: #f5f3ff; }
+  .incl-section .mod-summary.warn { background: #fdf4ff; }
+  .incl-section .mod-summary.fail { background: #fdf4ff; }
+  .incl-section .group-header { color: #7c3aed; border-bottom-color: #ddd6fe; }
+
+  .incl-label {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; padding: 2px 9px;
+    border-radius: 100px; letter-spacing: 0.03em;
+    background: #f5f3ff; color: #6d28d9; border: 1px solid #c4b5fd;
+    margin-bottom: 16px;
+  }
 `;
 
 // ── Main export ────────────────────────────────────────────────────────────────
@@ -297,9 +353,9 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
     (byModule[issue.moduleId] ??= []).push(issue);
   }
 
-  const biasIssues   = byModule[BIAS_MODULE_ID] ?? [];
-  const scoredIssues = issues.filter(i => i.moduleId !== BIAS_MODULE_ID);
-  const overall      = moduleStatus(scoredIssues.length ? scoredIssues : issues);
+  const inclusivityIssues = issues.filter(i => INCLUSIVITY_MODULE_IDS.has(i.moduleId));
+  const scoredIssues      = issues.filter(i => !INCLUSIVITY_MODULE_IDS.has(i.moduleId));
+  const overall           = moduleStatus(scoredIssues.length ? scoredIssues : issues);
 
   const counts = { fail: 0, warn: 0, pass: 0, info: 0 };
   for (const i of scoredIssues) counts[i.status] = (counts[i.status] ?? 0) + 1;
@@ -415,15 +471,53 @@ export function generateReport(issues, screenshotBase64, url, timestamp, outputP
     ].join('\n    ')}
   </div>
 
-  <!-- Inclusivity -->
-  ${biasIssues.length > 0 ? `
-  <div class="card incl-card">
+  <!-- Inclusivity & Diversity -->
+  ${inclusivityIssues.length > 0 ? `
+  <div class="card incl-card incl-section">
     <div class="card-title">
-      Inclusivity
-      <span class="note">informational — does not affect score</span>
+      Inclusivity &amp; Diversity
+      <span class="note">informational · does not affect WCAG score</span>
     </div>
-    <p class="incl-intro">The following findings relate to cultural and gender representation in the page content and imagery. They are provided for awareness only and do not contribute to the overall PASS/FAIL result.</p>
-    ${biasIssues.map(issueCard).join('\n')}
+    <p class="incl-intro">These findings are <strong>best-practice recommendations</strong> that go beyond WCAG compliance. They cover representation, language inclusivity, cultural assumptions, and geographic bias. None of these items affect the overall pass/fail result — they are provided to help build a more welcoming experience for all users.</p>
+    ${(() => {
+      const inclByModule = {};
+      for (const issue of inclusivityIssues) {
+        (inclByModule[issue.moduleId] ??= []).push(issue);
+      }
+      const inclSeen = new Set(inclusivityIssues.map(i => i.moduleId));
+      const allInclGrouped = new Set(INCLUSIVITY_GROUPS.flatMap(g => g.modules));
+
+      function inclModuleSection(moduleId, mIssues) {
+        const meta   = INCLUSIVITY_META[moduleId] ?? { name: moduleId };
+        const status = moduleStatus(mIssues);
+        return `
+    <details class="mod"${status === 'fail' || status === 'warn' ? ' open' : ''}>
+      <summary class="mod-summary ${status}">
+        <span class="mod-arrow">▶</span>
+        <span class="mod-icon">${ICON[status]}</span>
+        <span class="mod-name">${esc(meta.name)}</span>
+        <span class="mod-count">${mIssues.length} finding${mIssues.length !== 1 ? 's' : ''}</span>
+        ${badge(status)}
+      </summary>
+      <div class="mod-body">
+        ${mIssues.map(issueCard).join('')}
+      </div>
+    </details>`;
+      }
+
+      return [
+        ...INCLUSIVITY_GROUPS.flatMap(group => {
+          const ids = group.modules.filter(id => inclSeen.has(id));
+          if (ids.length === 0) return [];
+          return [`<div class="findings-group">
+      <div class="group-header">${esc(group.name)}</div>
+      ${ids.map(id => inclModuleSection(id, inclByModule[id] ?? [])).join('')}
+    </div>`];
+        }),
+        ...[...inclSeen].filter(id => !allInclGrouped.has(id))
+          .map(id => inclModuleSection(id, inclByModule[id] ?? [])),
+      ].join('\n    ');
+    })()}
   </div>` : ''}
 
 </div>
