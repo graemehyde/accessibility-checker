@@ -1,0 +1,8 @@
+services:
+  accessibility-checker:
+    build: .
+    env_file: .env
+    environment:
+      - REPORT_FILENAME   # pass through from host shell if set
+    volumes:
+      - ./reports:/reports

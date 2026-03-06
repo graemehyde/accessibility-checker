@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.43.0",
+    "openai": "^6.26.0",
     "playwright": "^1.50.0"
   },
   "engines": {

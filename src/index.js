@@ -2,6 +2,7 @@
 
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { chromium } from 'playwright';
 import { runLLMAudit } from './llm-audit.js';
 import { runRuleBasedAudit } from './rule-based-audit.js';
@@ -9,7 +10,7 @@ import { generateReport } from './report.js';
 
 // Load .env from project root if present
 try {
-  const envPath = resolve(new URL('../.env', import.meta.url).pathname);
+  const envPath = fileURLToPath(new URL('../.env', import.meta.url));
   const lines = readFileSync(envPath, 'utf8').split('\n');
   for (const line of lines) {
     const trimmed = line.trim();
@@ -28,20 +29,32 @@ try {
 
 const args = process.argv.slice(2);
 let url        = null;
-let outputPath = './report.html';
+const reportsDir = process.env.OUTPUT_DIR ?? '.';
+const defaultName = process.env.REPORT_FILENAME ?? 'report.html';
+let outputPath = `${reportsDir}/${defaultName}`;
+let provider   = undefined; // auto-detect by default
 
 for (let i = 0; i < args.length; i++) {
   if ((args[i] === '--output' || args[i] === '-o') && args[i + 1]) {
     outputPath = args[++i];
   } else if (args[i].startsWith('--output=')) {
     outputPath = args[i].slice('--output='.length);
+  } else if ((args[i] === '--llm-provider') && args[i + 1]) {
+    provider = args[++i];
+  } else if (args[i].startsWith('--llm-provider=')) {
+    provider = args[i].slice('--llm-provider='.length);
   } else if (!args[i].startsWith('-')) {
     url = args[i];
   }
 }
 
 if (!url) {
-  console.error('Usage: accessibility-checker <url> [--output <path>]');
+  console.error('Usage: accessibility-checker <url> [--output <path>] [--llm-provider gemini|azure]');
+  process.exit(1);
+}
+
+if (provider && !['gemini', 'azure'].includes(provider)) {
+  console.error(`Error: Unknown provider "${provider}". Valid options: gemini, azure`);
   process.exit(1);
 }
 
@@ -128,10 +141,24 @@ const browser = await chromium.launch({ headless: true });
 
 try {
   const page = await browser.newPage();
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await page.goto(url, { waitUntil: 'load', timeout: 60000 });
 
-  const screenshotBuffer = await page.screenshot({ fullPage: true });
+  // Give the page up to 8 s to reach network-idle (catches JS-rendered content).
+  // Sites with continuous polling will never reach idle — that's fine, we proceed.
+  await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {
+    console.error('Network did not reach idle within 8 s — proceeding with current state.');
+  });
+
+  // Try full-page screenshot; fall back to viewport if the page is too large.
+  let screenshotBuffer;
+  try {
+    screenshotBuffer = await page.screenshot({ fullPage: true, scale: 'css' });
+  } catch {
+    console.error('Full-page screenshot failed; falling back to viewport screenshot.');
+    screenshotBuffer = await page.screenshot({ fullPage: false, scale: 'css' });
+  }
   const screenshotBase64 = screenshotBuffer.toString('base64');
   const html = await page.content();
 
@@ -140,7 +167,7 @@ try {
 
   const [ruleIssues, llmIssues] = await Promise.all([
     runRuleBasedAudit(page),
-    runLLMAudit(screenshotBase64, html),
+    runLLMAudit(screenshotBase64, html, provider),
   ]);
 
   const allIssues = [...ruleIssues, ...llmIssues];
