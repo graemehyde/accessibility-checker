@@ -16,9 +16,12 @@ A Node.js CLI tool that audits any public URL for accessibility issues and produ
 ## Prerequisites
 
 - Node.js ≥ 18
-- A Google Gemini API key — get one at <https://aistudio.google.com/app/apikey>
+- **Gemini** — a Google Gemini API key from <https://aistudio.google.com/app/apikey>
+- **Azure OpenAI** (optional) — an Azure OpenAI resource with a vision-capable deployment (e.g. `gpt-4o`)
 
 ## Setup
+
+### Local (Node)
 
 ```bash
 npm install
@@ -27,16 +30,33 @@ npx playwright install chromium
 
 Create a `.env` file in the project root:
 
-```
-GEMINI_API_KEY=your_key_here
+```bash
+# Gemini (default)
+GEMINI_API_KEY=your_gemini_key
+
+# Azure OpenAI (optional — set all three to auto-switch to Azure)
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_API_KEY=your_azure_key
+AZURE_OPENAI_DEPLOYMENT=gpt-4o
+AZURE_OPENAI_API_VERSION=2024-12-01-preview
 ```
 
-The tool will load `.env` automatically. Alternatively, export the variable in your shell before running.
+If `AZURE_OPENAI_ENDPOINT` is set, Azure OpenAI is used automatically. Set only `GEMINI_API_KEY` to use Gemini. Use `--provider` to override at runtime.
+
+### Docker
+
+```bash
+docker compose build
+```
+
+No extra setup needed — Chromium is bundled in the image.
 
 ## Usage
 
 ```bash
-node src/index.js <url> [--output <path>]
+node src/index.js <url> [--output <path>] [--provider gemini|azure]
+# or
+npm run start <url>
 ```
 
 | Argument | Description |
@@ -44,21 +64,54 @@ node src/index.js <url> [--output <path>]
 | `<url>` | The fully-qualified URL to audit (must include `https://`) |
 | `--output <path>` | Path for the HTML report file (default: `./report.html`) |
 | `-o <path>` | Shorthand for `--output` |
+| `--llm-provider <name>` | LLM backend: `gemini` (default) or `azure`. Auto-detected from env vars if omitted. |
+| `-p <name>` | Shorthand for `--llm-provider` |
 
 **Examples:**
 
 ```bash
-# Audit a URL and write the report to the default location
+# Audit a URL using Gemini (default)
 node src/index.js https://example.com
 
 # Specify a custom report path
 node src/index.js https://www.example.com --output ./reports/example.html
+
+# Force Azure OpenAI as the LLM backend
+node src/index.js https://example.com --llm-provider azure
 
 # Redirect the terminal summary to a file, keep progress in the terminal
 node src/index.js https://example.com > summary.txt
 ```
 
 Progress and status messages are written to **stderr**, so stdout can be piped or redirected independently.
+
+## Docker
+
+The repo ships a [Dockerfile](Dockerfile) based on the official Playwright image, so Chromium and all Linux system dependencies are pre-installed.
+
+```bash
+# Build
+docker compose build
+
+# Run — reads credentials from .env automatically
+docker compose run --rm accessibility-checker https://example.com
+
+# Custom report filename
+docker compose run --rm accessibility-checker \
+  https://example.com --output /reports/example.html
+```
+
+Reports are written to `./reports/` on your machine via a bind-mount. The `.env` file is loaded automatically by `docker-compose.yml` via `env_file: .env` — no need to pass `-e` flags manually.
+
+To run without Compose:
+
+```bash
+docker build -t accessibility-checker .
+docker run --rm \
+  -e GEMINI_API_KEY=your_key \
+  -v "$PWD/reports:/reports" \
+  accessibility-checker https://example.com
+```
 
 ## Output
 
@@ -153,10 +206,13 @@ Every finding from both audit types shares the same schema:
 accessibility-checker/
 ├── src/
 │   ├── index.js            # CLI entry point — arg parsing, browser control, orchestration
-│   ├── llm-audit.js        # runLLMAudit()       — Gemini multimodal audit
+│   ├── llm-audit.js        # runLLMAudit()       — Gemini & Azure OpenAI multimodal audit
 │   ├── rule-based-audit.js # runRuleBasedAudit() — DOM checks via page.evaluate()
 │   └── report.js           # generateReport()    — self-contained HTML report writer
-├── .env                    # GEMINI_API_KEY (git-ignored)
+├── .env                    # API keys (git-ignored)
+├── .dockerignore
+├── Dockerfile              # Playwright + Node image for Linux testing
+├── docker-compose.yml      # Compose wrapper — loads .env, mounts ./reports
 ├── .gitignore
 └── package.json
 ```
@@ -165,5 +221,5 @@ accessibility-checker/
 
 - **LLM findings are probabilistic.** Colour contrast ratios reported by the LLM are estimates based on the screenshot; they should be verified with a dedicated contrast analyser for precise measurements.
 - **Dynamic content.** The audit runs against the page as loaded. Content rendered after user interaction (modals, menus, expandable sections) is not evaluated.
-- **Rule-based checks use `waitUntil: 'load'`.** Sites with content injected after the load event (lazy-loaded images, deferred scripts) may produce incomplete results.
+- **Page load strategy is `waitUntil: 'networkidle'`.** This catches most deferred content but very late-loading widgets (e.g. chat bubbles, consent banners) may still not be present.
 - **Touch targets are measured at desktop viewport width** (Playwright default: 1280px). Results may differ on mobile viewports.

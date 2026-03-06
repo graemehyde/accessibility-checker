@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { AzureOpenAI } from 'openai';
 
 const RESPONSE_SCHEMA_NOTE = `Respond ONLY with a valid JSON array. No markdown fences, no preamble, no trailing explanation — raw JSON only.
 
@@ -133,19 +134,72 @@ From both screenshot and HTML:
 ${INCLUSIVITY_RESPONSE_SCHEMA_NOTE}`;
 
 const MODEL = 'gemini-flash-lite-latest';
+// Each adapter exposes a single method:
+//   generate(systemPrompt, parts) => Promise<string>  (raw JSON text)
+// Parts use Gemini's internal shape; adapters handle translation.
 
-async function runModule(ai, name, systemPrompt, parts) {
-  console.error(`  [llm] starting: ${name}`);
-  try {
-    const response = await ai.models.generateContent({
+class GeminiAdapter {
+  constructor(apiKey) {
+    this._ai = new GoogleGenAI({ apiKey });
+  }
+  async generate(systemPrompt, parts) {
+    const response = await this._ai.models.generateContent({
       model: MODEL,
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-      },
+      config: { systemInstruction: systemPrompt, responseMimeType: 'application/json' },
       contents: [{ role: 'user', parts }],
     });
-    const results = JSON.parse(response.text.trim());
+    return response.text.trim();
+  }
+}
+
+class AzureAdapter {
+  constructor(endpoint, apiKey, deployment, apiVersion) {
+    this._client = new AzureOpenAI({ endpoint, apiKey, apiVersion, deployment });
+    this._deployment = deployment;
+  }
+  async generate(systemPrompt, parts) {
+    const content = parts.map(p =>
+      p.inlineData
+        ? { type: 'image_url', image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}`, detail: 'high' } }
+        : { type: 'text', text: p.text }
+    );
+    const response = await this._client.chat.completions.create({
+      model: this._deployment,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content },
+      ],
+    });
+    return response.choices[0].message.content.trim();
+  }
+}
+
+function createAdapter(provider) {
+  const resolved = provider ?? (process.env.AZURE_OPENAI_ENDPOINT ? 'azure' : 'gemini');
+  if (resolved === 'azure') {
+    const endpoint   = process.env.AZURE_OPENAI_ENDPOINT;
+    const apiKey     = process.env.AZURE_OPENAI_API_KEY;
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+    const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-12-01-preview';
+    if (!endpoint || !apiKey || !deployment) {
+      throw new Error('Azure OpenAI requires AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, and AZURE_OPENAI_DEPLOYMENT.');
+    }
+    return new AzureAdapter(endpoint, apiKey, deployment, apiVersion);
+  }
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY environment variable is not set. Export it before running: export GEMINI_API_KEY=your_key_here');
+  }
+  return new GeminiAdapter(apiKey);
+}
+
+// ── Module runner ─────────────────────────────────────────────────────────────
+
+async function runModule(adapter, name, systemPrompt, parts) {
+  console.error(`  [llm] starting: ${name}`);
+  try {
+    const raw = await adapter.generate(systemPrompt, parts);
+    const results = JSON.parse(raw);
     console.error(`  [llm] complete: ${name} (${results.length} result${results.length !== 1 ? 's' : ''})`);
     return results;
   } catch (err) {
@@ -154,28 +208,8 @@ async function runModule(ai, name, systemPrompt, parts) {
   }
 }
 
-function createClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      'GEMINI_API_KEY environment variable is not set. ' +
-      'Export it before running: export GEMINI_API_KEY=your_key_here'
-    );
-  }
-  return new GoogleGenAI({ apiKey });
-}
-
-export async function runInclusivityAudit(screenshotBase64, html) {
-  const ai = createClient();
-  const parts = [
-    { inlineData: { mimeType: 'image/png', data: screenshotBase64 } },
-    { text: `HTML source:\n\n${html}` },
-  ];
-  return runModule(ai, 'inclusivity', INCLUSIVITY_MODULE_PROMPT, parts);
-}
-
-export async function runLLMAudit(screenshotBase64, html) {
-  const ai = createClient();
+export async function runLLMAudit(screenshotBase64, html, provider) {
+  const adapter = createAdapter(provider);
 
   const screenshotPart = {
     inlineData: { mimeType: 'image/png', data: screenshotBase64 },
@@ -185,11 +219,11 @@ export async function runLLMAudit(screenshotBase64, html) {
   console.error('Running LLM audit modules in parallel…');
 
   const [imageResults, htmlResults, combinedResults, cognitiveResults, inclusivityResults] = await Promise.all([
-    runModule(ai, 'image',       IMAGE_MODULE_PROMPT,       [screenshotPart]),
-    runModule(ai, 'html',        HTML_MODULE_PROMPT,        [htmlPart]),
-    runModule(ai, 'combined',    COMBINED_MODULE_PROMPT,    [screenshotPart, htmlPart]),
-    runModule(ai, 'cognitive',   COGNITIVE_MODULE_PROMPT,   [htmlPart]),
-    runModule(ai, 'inclusivity', INCLUSIVITY_MODULE_PROMPT, [screenshotPart, htmlPart]),
+    runModule(adapter, 'image',       IMAGE_MODULE_PROMPT,       [screenshotPart]),
+    runModule(adapter, 'html',        HTML_MODULE_PROMPT,        [htmlPart]),
+    runModule(adapter, 'combined',    COMBINED_MODULE_PROMPT,    [screenshotPart, htmlPart]),
+    runModule(adapter, 'cognitive',   COGNITIVE_MODULE_PROMPT,   [htmlPart]),
+    runModule(adapter, 'inclusivity', INCLUSIVITY_MODULE_PROMPT, [screenshotPart, htmlPart]),
   ]);
 
   return [...imageResults, ...htmlResults, ...combinedResults, ...cognitiveResults, ...inclusivityResults];
